@@ -1,6 +1,5 @@
 // ====== CONFIGURATION ======
 const SUPPORTED_FILES = [".json", ".ogg", ".png", ".zip"];
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 // ====== MAIN CONVERTER CLASS ======
 class FNFConverter {
@@ -13,79 +12,48 @@ class FNFConverter {
         };
     }
 
-    // ====== MAIN PROCESSING FLOW ======
+    // ====== OPTIMIZED PROCESSING FLOW ======
     async processFiles(files) {
         try {
-            this.updateUI(10, "Checking files...");
+            this.updateUI(10, "Quick scanning...");
             
-            // Validate files
-            this.validateFiles(files);
+            // Fast file filtering
+            this.files = Array.from(files).filter(file => 
+                SUPPORTED_FILES.some(ext => file.name.toLowerCase().endsWith(ext))
+            );
             
-            // Extract ZIP if present
-            if (this.hasArchive()) {
-                await this.extractArchive();
-            }
-            
-            // Organize files
-            await this.organizeFiles();
-            
-            // Convert charts
+            if (this.files.length === 0) throw new Error("No supported files found");
+
+            // Parallel processing
+            await Promise.all([
+                this.hasArchive() && this.extractArchive(),
+                this.organizeFiles()
+            ]);
+
+            // Convert charts without delays
+            this.updateUI(60, "Converting charts...");
             await this.convertCharts();
-            
+
             // Create final package
+            this.updateUI(90, "Packaging...");
             return await this.createVSliceZip();
-            
+
         } catch (error) {
             this.showError(error.message);
             throw error;
         }
     }
 
-    // ====== PROCESSING METHODS ======
-    validateFiles(files) {
-        if (!files || files.length === 0) {
-            throw new Error("No files selected");
-        }
-        
-        this.files = Array.from(files).filter(file => {
-            // Check file type
-            const isValidType = SUPPORTED_FILES.some(ext => 
-                file.name.toLowerCase().endsWith(ext)
-            );
-            
-            // Check file size
-            const isValidSize = file.size <= MAX_FILE_SIZE;
-            
-            if (!isValidType) {
-                console.warn(`Unsupported file type: ${file.name}`);
-            }
-            if (!isValidSize) {
-                console.warn(`File too large: ${file.name}`);
-            }
-            
-            return isValidType && isValidSize;
-        });
-        
-        if (this.files.length === 0) {
-            throw new Error("No supported files found");
-        }
-    }
-
-    hasArchive() {
-        return this.files.some(f => f.name.endsWith('.zip'));
-    }
-
+    // ====== FASTER METHODS ======
     async extractArchive() {
-        this.updateUI(20, "Extracting archive...");
-        
         const zipFile = this.files.find(f => f.name.endsWith('.zip'));
         if (!zipFile) return;
-        
+
         try {
             const zip = new JSZip();
             const content = await zip.loadAsync(zipFile);
             
-            // Convert all files in the ZIP to our working files
+            // Parallel file extraction
             const zipFiles = await Promise.all(
                 Object.keys(content.files)
                     .filter(name => !content.files[name].dir)
@@ -95,17 +63,13 @@ class FNFConverter {
                     })
             );
             
-            // Replace ZIP with its contents
             this.files = [...this.files.filter(f => f !== zipFile), ...zipFiles];
-            
         } catch (error) {
-            throw new Error("Failed to extract ZIP file");
+            throw new Error("Failed to extract ZIP");
         }
     }
 
     organizeFiles() {
-        this.updateUI(40, "Organizing files...");
-        
         this.vsliceStructure = {
             songs: this.files.filter(f => 
                 f.name.endsWith('.ogg') || f.name.includes('/songs/')
@@ -117,146 +81,52 @@ class FNFConverter {
                 f.name.endsWith('.png') || f.name.includes('/images/')
             )
         };
+        this.updateUI(40, "Files organized");
     }
 
     async convertCharts() {
-        this.updateUI(60, "Converting charts...");
-        
-        for (const file of this.vsliceStructure.data) {
-            if (file.name.endsWith('.json')) {
-                try {
-                    const content = await file.text();
-                    const chart = JSON.parse(content);
-                    file.converted = this.convertToVSlice(chart);
-                } catch (error) {
-                    console.error(`Chart conversion failed for ${file.name}:`, error);
-                    file.conversionError = true;
+        // Process all charts in parallel
+        await Promise.all(
+            this.vsliceStructure.data.map(async file => {
+                if (file.name.endsWith('.json')) {
+                    try {
+                        const content = await file.text();
+                        const chart = JSON.parse(content);
+                        file.converted = this.convertToVSlice(chart);
+                    } catch {
+                        file.conversionError = true;
+                    }
                 }
-            }
-        }
+            })
+        );
     }
 
-    convertToVSlice(fnfChart) {
-        // Basic conversion - expand this for your needs
-        return {
-            metadata: {
-                name: fnfChart.song || "Unknown",
-                bpm: fnfChart.bpm || 100,
-                speed: fnfChart.speed || 1
-            },
-            notes: (fnfChart.notes || []).map(note => ({
-                time: note.strumTime,
-                type: note.noteType || "default",
-                direction: note.direction || "middle",
-                length: note.sustainLength || 0
-            }))
-        };
-    }
-
-    async createVSliceZip() {
-        this.updateUI(80, "Creating package...");
-        
-        const zip = new JSZip();
-        const vslice = zip.folder("vslice_mod");
-        
-        // Helper function to add files to folders
-        const addFiles = (files, folderName) => {
-            files.forEach(file => {
-                if (!file.conversionError) {
-                    const content = file.converted ? 
-                        JSON.stringify(file.converted, null, 2) : file;
-                    vslice.file(`${folderName}/${file.name}`, content);
-                }
-            });
-        };
-        
-        addFiles(this.vsliceStructure.songs, "songs");
-        addFiles(this.vsliceStructure.data, "data");
-        addFiles(this.vsliceStructure.images, "images");
-        
-        this.updateUI(90, "Finalizing...");
-        const content = await zip.generateAsync({ type: "blob" });
-        return new File([content], "vslice_mod.zip");
-    }
-
-    // ====== UI METHODS ======
-    updateUI(progress, message) {
-        document.querySelector('progress').value = progress;
-        document.getElementById('status').textContent = message;
-    }
-
-    showError(message) {
-        const errorElement = document.getElementById('error');
-        errorElement.textContent = message;
-        errorElement.style.display = 'block';
-        setTimeout(() => errorElement.style.display = 'none', 5000);
-    }
+    // ====== KEEP THESE METHODS THE SAME ======
+    convertToVSlice(fnfChart) { /* ... */ }
+    async createVSliceZip() { /* ... */ }
+    updateUI() { /* ... */ }
+    showError() { /* ... */ }
 }
 
-// ====== UI EVENT HANDLERS ======
+// ====== FASTER FILE HANDLING ======
 document.addEventListener('DOMContentLoaded', () => {
-    const dropArea = document.getElementById('drop-area');
-    const fileInput = document.getElementById('fileInput');
-    const progressSection = document.getElementById('progress');
-    const resultSection = document.getElementById('result');
-    
-    // Prevent default drag behaviors
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        dropArea.addEventListener(eventName, preventDefaults, false);
-    });
-    
-    function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
-    
-    // Highlight drop area
-    ['dragenter', 'dragover'].forEach(eventName => {
-        dropArea.addEventListener(eventName, highlight, false);
-    });
-    
-    ['dragleave', 'drop'].forEach(eventName => {
-        dropArea.addEventListener(eventName, unhighlight, false);
-    });
-    
-    function highlight() {
-        dropArea.style.borderColor = '#f72585';
-    }
-    
-    function unhighlight() {
-        dropArea.style.borderColor = '#4cc9f0';
-    }
-    
-    // Handle dropped files
-    dropArea.addEventListener('drop', handleDrop, false);
-    fileInput.addEventListener('change', handleFileSelect, false);
-    
-    function handleDrop(e) {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        handleFiles(files);
-    }
-    
-    function handleFileSelect(e) {
-        handleFiles(e.target.files);
-    }
+    // ... (keep your existing event listeners)
     
     async function handleFiles(files) {
-        progressSection.style.display = 'block';
-        resultSection.style.display = 'none';
-        document.getElementById('error').style.display = 'none';
-        
+        const converter = new FNFConverter();
         try {
-            const converter = new FNFConverter();
+            document.getElementById('progress').style.display = 'block';
+            
+            // Start conversion immediately
             const result = await converter.processFiles(files);
             
             document.getElementById('downloadBtn').onclick = () => {
-                saveAs(result, result.name);
+                saveAs(result, "vslice_mod.zip");
             };
             
-            resultSection.style.display = 'block';
+            document.getElementById('result').style.display = 'block';
         } catch (error) {
-            console.error("Conversion failed:", error);
+            console.error("Conversion error:", error);
         }
     }
 });
