@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FNF Mod to V-Slice Converter</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="lib/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 FNF to V-Slice Converter 🎤</h1>
+        
+        <div class="upload-box" id="drop-area">
+            <p>📁 Drag & drop FNF mod files here</p>
+            <p>or</p>
+            <input type="file" id="fileInput" multiple accept=".zip,.json,.ogg,.png">
+            <button onclick="document.getElementById('fileInput').click()">Select Files</button>
+        </div>
+        
+        <div class="progress" id="progress">
+            <progress value="0" max="100"></progress>
+            <p id="status">Waiting for files...</p>
+        </div>
+        
+        <div class="result" id="result">
+            <button id="downloadBtn">⬇️ Download V-Slice Mod</button>
+        </div>
+        
+        <div class="error" id="error"></div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
